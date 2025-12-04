@@ -12,12 +12,113 @@ const ChevronRight = ({ className }) => (
   </svg>
 );
 
+// Componente de ícone Volume (para indicar que é clicável)
+const Volume2 = ({ className }) => (
+  <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5L6 9H2v6h4l5 4V5zM19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07" />
+  </svg>
+);
+
+// Classe para geração de sons usando Web Audio API
+class AudioSynth {
+  constructor() {
+    this.audioContext = null;
+    this.masterGain = null;
+    this.initAudio();
+  }
+
+  // Inicializa o contexto de áudio
+  initAudio() {
+    try {
+      this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      this.masterGain = this.audioContext.createGain();
+      this.masterGain.connect(this.audioContext.destination);
+      this.masterGain.gain.value = 0.3; // Volume principal
+    } catch (error) {
+      console.error('Web Audio API não suportada:', error);
+    }
+  }
+
+  // Mapeamento de notas para frequências (Hz) - 2 oitavas a partir de E2
+  getNoteFrequency(nota) {
+    const frequencies = {
+      // Oitava 2 (grave - contrabaixo)
+      'MI': 82.41,    // E2
+      'F#': 92.50,    // F#2
+      'SOL': 98.00,   // G2
+      'G#': 103.83,   // G#2
+      'LA': 110.00,   // A2
+      'SI': 123.47,   // B2
+      'DÓ': 130.81,   // C3
+      'C#': 138.59,   // C#3
+      'RÉ': 146.83,   // D3
+      'D#': 155.56,   // D#3
+    };
+    return frequencies[nota] || 82.41;
+  }
+
+  // Toca uma nota com envelope ADSR
+  playNote(nota, duration = 0.8) {
+    if (!this.audioContext) return;
+
+    const frequency = this.getNoteFrequency(nota);
+    const now = this.audioContext.currentTime;
+
+    // Cria oscilador (gerador de som)
+    const oscillator = this.audioContext.createOscillator();
+    oscillator.type = 'sine'; // Som suave tipo contrabaixo
+    oscillator.frequency.setValueAtTime(frequency, now);
+
+    // Cria envelope de volume (ADSR)
+    const gainNode = this.audioContext.createGain();
+    gainNode.gain.setValueAtTime(0, now);
+    
+    // Attack: sobe rápido
+    gainNode.gain.linearRampToValueAtTime(0.8, now + 0.01);
+    // Decay: desce um pouco
+    gainNode.gain.linearRampToValueAtTime(0.6, now + 0.1);
+    // Sustain mantém em 0.6
+    // Release: fade out
+    gainNode.gain.exponentialRampToValueAtTime(0.01, now + duration);
+
+    // Conecta tudo
+    oscillator.connect(gainNode);
+    gainNode.connect(this.masterGain);
+
+    // Toca e para
+    oscillator.start(now);
+    oscillator.stop(now + duration);
+  }
+}
+
 // Componente principal
 const EscalaMiInterativa = () => {
   // Estado para controlar qual escala está sendo exibida
   const [escalaAtiva, setEscalaAtiva] = React.useState('maior');
   const [mostrarIntervalos, setMostrarIntervalos] = React.useState(true);
   const [mostrarArpejo, setMostrarArpejo] = React.useState(false);
+  const [audioEnabled, setAudioEnabled] = React.useState(true);
+  const [notaTocando, setNotaTocando] = React.useState(null);
+
+  // Ref para o sintetizador de áudio
+  const synthRef = React.useRef(null);
+
+  // Inicializa o sintetizador ao montar o componente
+  React.useEffect(() => {
+    synthRef.current = new AudioSynth();
+  }, []);
+
+  // Função para tocar uma nota
+  const tocarNota = (nota) => {
+    if (!audioEnabled || !synthRef.current) return;
+    
+    // Feedback visual
+    setNotaTocando(nota);
+    setTimeout(() => setNotaTocando(null), 300);
+    
+    // Toca o som
+    synthRef.current.playNote(nota);
+  };
 
   // Definição das escalas (2 oitavas)
   const escalas = {
@@ -69,9 +170,35 @@ const EscalaMiInterativa = () => {
 
   // Função para obter cor da nota
   const getNotaCor = (nota, index) => {
-    if (index === 0 || index === 7 || index === 14) return 'bg-red-100 border-red-400 text-red-800'; // Tônicas
-    if (isAlterada(nota)) return 'bg-yellow-50 border-yellow-400';
-    return 'bg-white border-gray-300';
+    const isTocando = notaTocando === nota;
+    const baseClass = isTocando ? 'scale-110 ' : '';
+    
+    if (index === 0 || index === 7 || index === 14) {
+      return baseClass + (isTocando 
+        ? 'bg-red-200 border-red-600 text-red-900' 
+        : 'bg-red-100 border-red-400 text-red-800');
+    }
+    if (isAlterada(nota)) {
+      return baseClass + (isTocando 
+        ? 'bg-yellow-100 border-yellow-600' 
+        : 'bg-yellow-50 border-yellow-400');
+    }
+    return baseClass + (isTocando 
+      ? 'bg-gray-100 border-gray-600' 
+      : 'bg-white border-gray-300');
+  };
+
+  // Função para tocar a escala completa
+  const tocarEscalaCompleta = () => {
+    if (!audioEnabled || !synthRef.current) return;
+    
+    const notasParaTocar = mostrarArpejo ? escala.arpejo : escala.notas;
+    
+    notasParaTocar.forEach((nota, index) => {
+      setTimeout(() => {
+        tocarNota(nota);
+      }, index * 400); // 400ms entre cada nota
+    });
   };
 
   return (
@@ -84,6 +211,7 @@ const EscalaMiInterativa = () => {
             <h1 className="text-4xl font-bold text-gray-800">Escalas de MI</h1>
           </div>
           <p className="text-gray-600">Estudo interativo - 2 Oitavas</p>
+          <p className="text-sm text-gray-500 mt-2">🔊 Clique nas notas para ouvir o som</p>
         </div>
 
         {/* Seletor de Escalas */}
@@ -120,7 +248,7 @@ const EscalaMiInterativa = () => {
           </div>
 
           {/* Controles */}
-          <div className="flex gap-4 mb-6">
+          <div className="flex flex-wrap gap-4 mb-6">
             <button
               onClick={() => setMostrarIntervalos(!mostrarIntervalos)}
               className={`px-4 py-2 rounded-lg font-semibold transition-all ${
@@ -141,6 +269,28 @@ const EscalaMiInterativa = () => {
             >
               {mostrarArpejo ? 'Escala' : 'Arpejo'}
             </button>
+            <button
+              onClick={() => setAudioEnabled(!audioEnabled)}
+              className={`px-4 py-2 rounded-lg font-semibold transition-all flex items-center gap-2 ${
+                audioEnabled
+                  ? 'bg-purple-500 text-white'
+                  : 'bg-gray-200 text-gray-700'
+              }`}
+            >
+              <Volume2 className="w-4 h-4" />
+              {audioEnabled ? 'Som Ligado' : 'Som Desligado'}
+            </button>
+            <button
+              onClick={tocarEscalaCompleta}
+              disabled={!audioEnabled}
+              className={`px-4 py-2 rounded-lg font-semibold transition-all ${
+                audioEnabled
+                  ? 'bg-orange-500 text-white hover:bg-orange-600'
+                  : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+              }`}
+            >
+              ▶ Tocar {mostrarArpejo ? 'Arpejo' : 'Escala'}
+            </button>
           </div>
 
           {/* Display das Notas ou Arpejo */}
@@ -153,14 +303,16 @@ const EscalaMiInterativa = () => {
                   <div className="flex flex-wrap gap-2">
                     {escala.notas.slice(0, 8).map((nota, idx) => (
                       <div key={`nota-1-${idx}`} className="flex flex-col items-center">
-                        <div
-                          className={`w-16 h-16 flex items-center justify-center rounded-lg border-2 font-bold text-lg ${getNotaCor(
+                        <button
+                          onClick={() => tocarNota(nota)}
+                          disabled={!audioEnabled}
+                          className={`w-16 h-16 flex items-center justify-center rounded-lg border-2 font-bold text-lg transition-all cursor-pointer hover:scale-105 ${getNotaCor(
                             nota,
                             idx
-                          )}`}
+                          )} ${!audioEnabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                         >
                           {nota}
-                        </div>
+                        </button>
                         {mostrarIntervalos && idx < 7 && (
                           <div className="mt-1">
                             <ChevronRight className="w-4 h-4 text-gray-400" />
@@ -180,14 +332,16 @@ const EscalaMiInterativa = () => {
                   <div className="flex flex-wrap gap-2">
                     {escala.notas.slice(7, 15).map((nota, idx) => (
                       <div key={`nota-2-${idx}`} className="flex flex-col items-center">
-                        <div
-                          className={`w-16 h-16 flex items-center justify-center rounded-lg border-2 font-bold text-lg ${getNotaCor(
+                        <button
+                          onClick={() => tocarNota(nota)}
+                          disabled={!audioEnabled}
+                          className={`w-16 h-16 flex items-center justify-center rounded-lg border-2 font-bold text-lg transition-all cursor-pointer hover:scale-105 ${getNotaCor(
                             nota,
                             idx + 7
-                          )}`}
+                          )} ${!audioEnabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                         >
                           {nota}
-                        </div>
+                        </button>
                         {mostrarIntervalos && idx < 7 && (
                           <div className="mt-1">
                             <ChevronRight className="w-4 h-4 text-gray-400" />
@@ -208,12 +362,18 @@ const EscalaMiInterativa = () => {
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {escala.arpejo.map((nota, idx) => (
-                    <div
+                    <button
                       key={`arpejo-${idx}`}
-                      className="w-16 h-16 flex items-center justify-center rounded-lg border-2 font-bold text-lg bg-green-100 border-green-400 text-green-800"
+                      onClick={() => tocarNota(nota)}
+                      disabled={!audioEnabled}
+                      className={`w-16 h-16 flex items-center justify-center rounded-lg border-2 font-bold text-lg transition-all cursor-pointer hover:scale-105 ${
+                        notaTocando === nota
+                          ? 'bg-green-200 border-green-600 text-green-900 scale-110'
+                          : 'bg-green-100 border-green-400 text-green-800'
+                      } ${!audioEnabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
                       {nota}
-                    </div>
+                    </button>
                   ))}
                 </div>
               </div>
@@ -236,6 +396,10 @@ const EscalaMiInterativa = () => {
                 <div className="w-8 h-8 bg-white border-2 border-gray-300 rounded"></div>
                 <span>Nota natural</span>
               </div>
+              <div className="flex items-center gap-2">
+                <Volume2 className="w-8 h-8 text-purple-600" />
+                <span>Clique para ouvir</span>
+              </div>
             </div>
           </div>
         </div>
@@ -246,19 +410,23 @@ const EscalaMiInterativa = () => {
           <ul className="space-y-2 text-gray-700">
             <li className="flex items-start gap-2">
               <span className="text-blue-500 font-bold">1.</span>
-              <span>Cante cada escala em voz alta para internalizar os intervalos</span>
+              <span>Clique nas notas para ouvir e memorizar o som de cada intervalo</span>
             </li>
             <li className="flex items-start gap-2">
               <span className="text-blue-500 font-bold">2.</span>
-              <span>Compare as diferenças entre MI Maior e as escalas menores</span>
+              <span>Use o botão "Tocar Escala" para ouvir toda a sequência</span>
             </li>
             <li className="flex items-start gap-2">
               <span className="text-blue-500 font-bold">3.</span>
-              <span>Pratique os arpejos para memorizar as tríades principais</span>
+              <span>Cante junto com as notas para internalizar os intervalos</span>
             </li>
             <li className="flex items-start gap-2">
               <span className="text-blue-500 font-bold">4.</span>
-              <span>Observe que as TÔNICAS (MI) aparecem no início, meio e fim</span>
+              <span>Compare as diferenças sonoras entre MI Maior e as escalas menores</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <span className="text-blue-500 font-bold">5.</span>
+              <span>Pratique os arpejos para memorizar as tríades principais</span>
             </li>
           </ul>
         </div>
